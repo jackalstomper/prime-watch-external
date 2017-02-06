@@ -1,0 +1,3 @@
+[submodule "PrimeMemoryDumping"]
+	path = PrimeMemoryDumping
+	url = https://github.com/Pwootage/PrimeMemoryDumping.git
