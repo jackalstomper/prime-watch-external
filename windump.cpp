@@ -28,7 +28,7 @@ void wootWootGetRoot() {
   CloseHandle(handle);
 }
 
-HANDLE dolphinProcHandle;
+HANDLE dolphinProcHandle = 0;
 void *offset = (void *) 0x7FFF0000;
 
 void findAndAttachProcess() {
@@ -37,16 +37,24 @@ void findAndAttachProcess() {
 
   HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
+  bool found = false;
   if (Process32First(snapshot, &entry) == TRUE) {
     while (Process32Next(snapshot, &entry) == TRUE) {
       if (strncmp(entry.szExeFile, "Dolphin.exe", 10) == 0) {
         cout << "Found Dolphin, PID " << entry.th32ProcessID << endl;
         dolphinProcHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
+        found = true;
+        break;
       }
     }
   }
 
   CloseHandle(snapshot);
+
+  if (!found) {
+    cerr << "Can't find dolphin. Launch dolphin first!" << endl;
+    exit(1);
+  }
 }
 
 namespace GameMemory {

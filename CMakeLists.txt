@@ -17,4 +17,6 @@ if (WIN32 OR CYGWIN)
     set(SOURCE_FILES ${SOURCE_FILES} windump.cpp)
 endif ()
 
+SET(BUILD_SHARED_LIBRARIES OFF)
+SET(CMAKE_EXE_LINKER_FLAGS "-static")
 add_executable(prime_watch_external ${SOURCE_FILES})
