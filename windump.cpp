@@ -60,6 +60,9 @@ void findAndAttachProcess() {
 namespace GameMemory {
     uint32_t getRealPtr(std::uint32_t address) {
       uint32_t masked = address & 0x7FFFFFFF;
+      if (masked > 0x1800000) {
+        return 0;
+      }
       return masked;
     }
 
