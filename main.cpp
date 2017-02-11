@@ -86,7 +86,7 @@ void handleClient(int sock) {
     uint32_t gameID = GameMemory::read_u32(0x80000000);
     uint32_t makerID = GameMemory::read_u32(0x80000004) >> 16;
 
-    if (gameID == 0x474D3845 && makerID == 0x3031) {
+    if (gameID == 0x4147424A || (gameID == 0x474D3845 && makerID == 0x3031)) {
 //        json_message["heap"] = Prime1JsonDumper::parseHeap();
       json_message["camera"] = Prime1JsonDumper::parseCamera();
 //        json_message["player"] = Prime1JsonDumper::parsePlayer();
@@ -97,6 +97,9 @@ void handleClient(int sock) {
     }
 
     string message = json_message.dump();
+    if (message.length() == 0 || message == "null") {
+      message = "{}";
+    }
     uint32_t len = static_cast<uint32_t>(message.length());
     uint32_t belen = htobe32(len);
     buffer.write(&belen, 4);
