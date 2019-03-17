@@ -1,14 +1,37 @@
 #include "common.h"
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/unistd.h>
-#include <netinet/in.h>
+
+#ifdef WIN32
+#   include <winsock.h>
+#   include <signal.h>
+#else
+#   include <sys/socket.h>
+#   include <sys/unistd.h>
+#   include <netinet/in.h>
+#   include <netdb.h>
+#endif
+
 #include <iostream>
 #include <cstdio>
-#include <netdb.h>
 #include "GameMemory.h"
 #include "prime1/Prime1JsonDumper.hpp"
 #include "MemoryBuffer.hpp"
+
+#ifdef WIN32
+#   ifndef PW_SOCKET
+#       define PW_SOCKET SOCKET
+#   endif
+#   ifndef ssize_t
+#       define ssize_t int64_t
+#   endif
+#   ifndef MSG_NOSIGNAL
+#       define MSG_NOSIGNAL 0
+#   endif
+#else
+#   ifndef PW_SOCKET
+#       define PW_SOCKET int
+#   endif
+#endif
 
 using namespace std;
 using namespace nlohmann;
@@ -20,35 +43,75 @@ void sighup(int sig) {
   run = false;
 }
 
+void handleClient(PW_SOCKET sock);
+
 int main() {
-  wootWootGetRoot();
   findAndAttachProcess();
 
   //Not sure what I'm doing wrong here
+#ifndef WIN32 // Windows doesn't support SIGHUP
   signal(SIGHUP, sighup);
+#endif
   signal(SIGINT, sighup);
   signal(SIGABRT, sighup);
 
+#ifdef WIN32
+  // initialize winsock for use
+  WSADATA wsaData;
+  int error = WSAStartup(MAKEWORD(2, 2), &wsaData);
+  if (error != 0) {
+    cerr << "Failed to initialize winsock: " << error << endl;
+    return 1;
+  }
+
+  if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
+    cerr << "Could not find a usable version of winsock" << endl;
+    WSACleanup();
+    return 1;
+  }
+#endif
+
   constexpr uint16_t port = 43673;
-  int serverSock = socket(AF_INET, SOCK_STREAM, 0);
+  PW_SOCKET serverSock = socket(AF_INET, SOCK_STREAM, 0);
 
   if (serverSock < 0) {
     cerr << "Failed to create server sock" << endl;
+#ifdef WIN32
+    int error = WSAGetLastError();
+    cerr << "Error: " << error << endl;
+    WSACleanup();
+#endif
     return 1;
   }
 
   sockaddr_in serverAddr;
   memset(&serverAddr, 0, sizeof(serverAddr));
   serverAddr.sin_family = AF_INET;
+
+#ifdef PW_USE_LOOPBACK
+  serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+#else
   serverAddr.sin_addr.s_addr = INADDR_ANY;
+#endif
+
   serverAddr.sin_port = htons(port);
 
 
+#ifdef WIN32
+  char value = 1;
+  setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+#else
   int value = 1;
   setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+#endif
 
-  if (bind(serverSock, reinterpret_cast<sockaddr *>(&serverAddr), sizeof(serverAddr)) < 0) {
+  if (::bind(serverSock, reinterpret_cast<sockaddr *>(&serverAddr), sizeof(serverAddr)) < 0) {
     cerr << "Failed to bind to port" << endl;
+#ifdef WIN32
+    int error = WSAGetLastError();
+    cerr << "Error: " << error << endl;
+    WSACleanup();
+#endif
     return 1;
   }
 
@@ -61,21 +124,31 @@ int main() {
     sockaddr_in clientAddr;
     int clientSize = sizeof(clientAddr);
     memset(&clientAddr, 0, sizeof(clientAddr));
-    int clientSock = accept(serverSock, reinterpret_cast<sockaddr *>(&clientAddr), &clientSize);
+    PW_SOCKET clientSock = accept(serverSock, reinterpret_cast<sockaddr *>(&clientAddr), &clientSize);
     cout << "Client connected" << endl;
 
     handleClient(clientSock);
 
+#ifdef WIN32
+    closesocket(clientSock);
+#else
     close(clientSock);
+#endif
   }
 
   cout << "Closing server" << endl;
+
+#ifdef WIN32
+  closesocket(serverSock);
+  WSACleanup();
+#else
   close(serverSock);
+#endif
 
   return 0;
 }
 
-void handleClient(int sock) {
+void handleClient(PW_SOCKET sock) {
   MemoryBuffer buffer(0x10000);
 
   while (true) {
@@ -101,7 +174,7 @@ void handleClient(int sock) {
       message = "{}";
     }
     uint32_t len = static_cast<uint32_t>(message.length());
-    uint32_t belen = htobe32(len);
+    uint32_t belen = hostToBe32(len);
     buffer.write(&belen, 4);
     buffer << message;
 
@@ -115,7 +188,11 @@ void handleClient(int sock) {
       cerr << "Didn't send everything?!? " << sent << "/" << (len + 4) << endl;
     }
 
-    usleep(1000);
+#ifdef WIN32
+    Sleep(33);
+#else
+    usleep(33);
+#endif
   }
 }
 
