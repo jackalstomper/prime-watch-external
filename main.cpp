@@ -5,9 +5,12 @@
 #   include <winsock.h>
 #   include <signal.h>
 #else
+#   include <stdio.h>
 #   include <sys/socket.h>
 #   include <sys/unistd.h>
+#   include <unistd.h>
 #   include <netinet/in.h>
+#   include <arpa/inet.h>
 #   include <netdb.h>
 #endif
 
@@ -122,7 +125,7 @@ int main() {
   while (run) {
     cout << "Waiting for client..." << endl;
     sockaddr_in clientAddr;
-    int clientSize = sizeof(clientAddr);
+    socklen_t clientSize = sizeof(clientAddr);
     memset(&clientAddr, 0, sizeof(clientAddr));
     PW_SOCKET clientSock = accept(serverSock, reinterpret_cast<sockaddr *>(&clientAddr), &clientSize);
     cout << "Client connected" << endl;
@@ -178,7 +181,11 @@ void handleClient(PW_SOCKET sock) {
     buffer.write(&belen, 4);
     buffer << message;
 
+    #ifdef __APPLE__
+    ssize_t sent = send(sock, buffer.getBuff(), len + 4, 0);
+    #else
     ssize_t sent = send(sock, buffer.getBuff(), len + 4, MSG_NOSIGNAL);
+    #endif
     if (sent < 0) {
       cerr << "Failed to write" << endl;
       return;
