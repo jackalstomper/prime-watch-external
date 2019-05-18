@@ -25,6 +25,7 @@
 #include <prime1/CStateManager.hpp>
 #include <unordered_map>
 #include <fstream>
+#include <chrono>
 #include "GameMemory.h"
 #include "prime1/Prime1JsonDumper.hpp"
 #include "MemoryBuffer.hpp"
@@ -38,6 +39,9 @@
 #   endif
 #   ifndef MSG_NOSIGNAL
 #       define MSG_NOSIGNAL 0
+#   endif
+#   ifndef socklen_t
+#       define socklen_t int
 #   endif
 #else
 #   ifndef PW_SOCKET
@@ -165,7 +169,7 @@ void handleWorldLoads(ostream &pFile);
 void handleClient(PW_SOCKET sock) {
   MemoryBuffer buffer(0x10000);
 
-  #ifdef win32
+  #ifdef WIN32
   CreateDirectory("logs", nullptr);
   #else
   mkdir("logs", 0755);
