@@ -4,7 +4,9 @@
 #ifdef WIN32
 #   include <winsock.h>
 #   include <signal.h>
+#include <windows.h>
 #else
+
 #   include <stdio.h>
 #   include <sys/socket.h>
 #   include <sys/unistd.h>
@@ -12,10 +14,17 @@
 #   include <netinet/in.h>
 #   include <arpa/inet.h>
 #   include <netdb.h>
+#include <sys/stat.h>
+
 #endif
 
 #include <iostream>
 #include <cstdio>
+#include <prime1/CGameGlobalObjects.hpp>
+#include <prime1/CGameState.hpp>
+#include <prime1/CStateManager.hpp>
+#include <unordered_map>
+#include <fstream>
 #include "GameMemory.h"
 #include "prime1/Prime1JsonDumper.hpp"
 #include "MemoryBuffer.hpp"
@@ -151,10 +160,29 @@ int main() {
   return 0;
 }
 
+void handleWorldLoads(ostream &pFile);
+
 void handleClient(PW_SOCKET sock) {
   MemoryBuffer buffer(0x10000);
 
+  #ifdef win32
+  CreateDirectory("logs", nullptr);
+  #else
+  mkdir("logs", 0755);
+  #endif
+
+  auto time = chrono::system_clock::now().time_since_epoch().count();
+  string filename = "logs/loads_" + to_string(time) + ".log";
+  ofstream outFile(filename, ios_base::out | ios_base::binary);
+  if (!outFile) {
+    cout << "Failed to open log file" << endl;
+    exit(3);
+  }
+  cout << "Logging loads to " << filename << endl;
+
   while (true) {
+    handleWorldLoads(outFile);
+
     buffer.clear();
 
     json json_message;
@@ -203,3 +231,131 @@ void handleClient(PW_SOCKET sock) {
   }
 }
 
+int timeToFrames(double time) {
+  return round(time * 60);
+}
+
+struct DolphinCAreaTracking {
+  uint32_t mrea = -1;
+  EChain chain = EChain::Deallocated;
+  int loadStart = 0;
+  int loadEnd = 0;
+  EPhase phase = EPhase::LoadHeader;
+  EOcclusionState occlusionState = EOcclusionState::Occluded;
+};
+
+static unordered_map<uint32_t, DolphinCAreaTracking> areas;
+
+string phaseName(EPhase phase) {
+  switch (phase) {
+    case EPhase::LoadHeader:
+      return "Load header";
+    case EPhase::LoadSecSizes:
+      return "Load section sizes";
+    case EPhase::ReserveSections:
+      return "Reserve Sections";
+    case EPhase::LoadDataSections:
+      return "Load data sections";
+    case EPhase::WaitForFinish:
+      return "Wait for finish";
+  }
+  return "Unknown";
+}
+
+string chainName(EChain chain) {
+  switch (chain) {
+    case EChain::Invalid:
+      return "Invalid";
+    case EChain::ToDeallocate:
+      return "ToDeallocate";
+    case EChain::Deallocated:
+      return "Deallocated";
+    case EChain::Loading:
+      return "Loading";
+    case EChain::Alive:
+      return "Alive";
+    case EChain::AliveJudgement:
+      return "Alive Judgement";
+  }
+  return "Unknown";
+}
+
+string occlusionName(EOcclusionState state) {
+  switch (state) {
+    case EOcclusionState::Occluded:
+      return "Occluded";
+    case EOcclusionState::Visible:
+      return "Visible";
+  }
+  return "Unknown";
+}
+
+void handleWorldLoads(ostream &outFile) {
+  CGameGlobalObjects global(CGameGlobalObjects::LOCATION);
+  CStateManager manager(CStateManager::LOCATION);
+  CGameState gameState = global.gameState.deref();
+  double time = gameState.playTime.read();
+  int frame = timeToFrames(time);
+
+  CWorld world = manager.world.deref();
+  int areaCount = world.areas.size.read();
+  for (int i = 0; i < areaCount; i++) {
+    auto autoPtr = world.areas[i];
+//    cout << hex << " autoptr offset: " << autoPtr.ptr();
+//    cout << hex << " autoptr second value: " << autoPtr.dataPtr.read();
+//    cout << endl;
+    CGameArea area = autoPtr.dataPtr.deref();
+    uint32_t mrea = area.mrea.read();
+
+    DolphinCAreaTracking &areaTracking = areas[mrea];
+
+    stringstream ss;
+    EChain newChain = area.curChain.read();
+    if (newChain != areaTracking.chain && newChain != EChain::AliveJudgement) {
+      cout << dec << frame << ": Area " << hex << mrea
+           << " chain " << chainName(areaTracking.chain)
+           << " -> " << chainName(newChain) << endl;
+
+      areaTracking.chain = newChain;
+      if (newChain == EChain::Loading) {
+        areaTracking.loadStart = frame;
+      }
+      if (newChain == EChain::Alive) {
+        areaTracking.loadEnd = frame;
+        int loadFrames = areaTracking.loadEnd - areaTracking.loadStart;
+        ss << dec << frame << ": Area " << hex << mrea
+           << " loaded in " << dec << loadFrames << " frames" << endl;
+      }
+    }
+
+    EPhase newPhase = area.phase.read();
+    if (newPhase != areaTracking.phase) {
+      ss << dec << frame << ": Area " << hex << mrea
+         << " phase " << phaseName(areaTracking.phase)
+         << " -> " << phaseName(newPhase) << endl;
+      areaTracking.phase = newPhase;
+    }
+
+    EOcclusionState newOcclusion = EOcclusionState::Occluded;
+    if (area.postConstructed.read() != 0) {
+      CPostConstructed pc = area.postConstructed.read();
+      newOcclusion = pc.occlusionState.read();
+    }
+
+    if (newOcclusion != areaTracking.occlusionState) {
+      ss << dec << frame << ": Area " << hex << mrea
+         << " occlusion " << occlusionName(areaTracking.occlusionState)
+         << " -> " << occlusionName(newOcclusion) << endl;
+      areaTracking.occlusionState = newOcclusion;
+    }
+
+    string str = ss.str();
+    if (!str.empty()) {
+      cout << str;
+      cout.flush();
+      outFile << str;
+      outFile.flush();
+    }
+  }
+
+}
