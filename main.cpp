@@ -228,9 +228,9 @@ void handleClient(PW_SOCKET sock) {
     }
 
 #ifdef WIN32
-    Sleep(33);
+    Sleep(16);
 #else
-    usleep(33);
+    usleep(16);
 #endif
   }
 }
