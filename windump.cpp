@@ -1,6 +1,7 @@
 #include "common.h"
 
 #include <windows.h>
+#include <strsafe.h>
 #include <tlhelp32.h>
 #include <psapi.h>
 
@@ -12,6 +13,27 @@ using namespace std;
 HANDLE dolphinProcHandle = 0;
 uint64_t emuRAMAddressStart = 0;
 bool MEM2Present = false;
+
+void ErrorExit(LPTSTR lpszFunction) {
+  // Retrieve the system error message for the last-error code
+
+  LPVOID lpMsgBuf;
+  DWORD dw = GetLastError();
+
+  FormatMessage(
+    FORMAT_MESSAGE_ALLOCATE_BUFFER |
+    FORMAT_MESSAGE_FROM_SYSTEM |
+    FORMAT_MESSAGE_IGNORE_INSERTS,
+    NULL,
+    dw,
+    MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+    (LPTSTR) &lpMsgBuf,
+    0, NULL);
+
+  cerr << lpszFunction << " failed with error " << dw << ": " << (LPTSTR)lpMsgBuf << endl;
+  LocalFree(lpMsgBuf);
+  ExitProcess(dw);
+}
 
 // Shamelessly ripped from Dolphin-memory-engine
 // https://github.com/aldelaro5/Dolphin-memory-engine/blob/master/Source/DolphinProcess/Windows/WindowsDolphinProcess.cpp
@@ -78,6 +100,9 @@ void findAndAttachProcess() {
       if (strncmp(entry.szExeFile, "Dolphin.exe", 10) == 0) {
         cout << "Found Dolphin, PID " << entry.th32ProcessID << endl;
         dolphinProcHandle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_READ, FALSE, entry.th32ProcessID);
+        if (dolphinProcHandle == NULL)
+          ErrorExit(TEXT("OpenProcess"));
+
         found = true;
         break;
       }
